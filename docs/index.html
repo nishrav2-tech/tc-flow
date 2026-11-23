@@ -129,6 +129,23 @@ a.brand{color:inherit;text-decoration:none}
 .legend span{display:flex;gap:5px;align-items:center}
 @media(max-width:640px){header.top .wrap{gap:8px;flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px}.brand small{display:none}.grow{display:none}}
 
+
+.tl{display:flex;align-items:flex-start;margin:14px 0 4px;position:relative}
+.tl .node{flex:1;text-align:center;position:relative;font-size:12.5px}
+.tl .node:before{content:"";position:absolute;top:9px;left:-50%;right:50%;height:3px;background:var(--border)}
+.tl .node:first-child:before{display:none}
+.tl .node.done:before{background:var(--accent)}
+.tl .ball{width:20px;height:20px;border-radius:50%;margin:0 auto 6px;border:3px solid var(--border-strong);background:var(--surface);position:relative;z-index:1}
+.tl .done .ball{background:var(--accent);border-color:var(--accent)}
+.tl .now .ball{border-color:var(--accent)}
+.tl .issue .ball{background:var(--danger);border-color:var(--danger)}
+.tl .lbl{font-weight:600} .tl .dt{color:var(--ink-3)}
+.tlnote{background:var(--danger-soft);color:var(--danger);border-radius:var(--r-md);padding:9px 12px;font-size:13px;margin-top:10px}
+.mini{display:flex;gap:3px;margin-top:7px;align-items:center;font-size:11.5px;color:var(--ink-3)}
+.mini i{width:18px;height:5px;border-radius:3px;background:var(--border)} .mini i.on{background:var(--accent)} .mini i.bad{background:var(--danger)}
+.contact{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.contact .big{font:500 28px/1 var(--serif)}
+details summary{cursor:pointer;color:var(--ink-3);font-size:13px;margin-top:10px}
 </style>
 </head>
 <body>
@@ -158,8 +175,8 @@ a.brand{color:inherit;text-decoration:none}
 
   <main class="wrap" style="padding-bottom:60px">
     <h1>Deals under contract</h1>
-    <p class="sub" id="sub">Every deal from New Contract to Deal Closed. The TC agent checks GHL and Gmail each morning and ticks what it can prove.</p>
-    <div class="grid kpis" id="kpis" style="margin-top:16px"></div>
+    <p class="sub" id="sub">From New Contract to Deal Closed. <span id="agentInfo"></span></p>
+    <div class="grid kpis" id="kpis" style="margin-top:16px;grid-template-columns:repeat(4,1fr)"></div>
 
     <div class="toolbar">
       <h2 style="margin:0">Pipeline</h2><div class="grow"></div>
@@ -168,13 +185,7 @@ a.brand{color:inherit;text-decoration:none}
     </div>
     <div class="board" id="board"></div>
 
-    <div class="grid two" style="margin-top:18px">
-      <div><h2>Action items <span class="sub" id="actCount" style="font-weight:400"></span></h2>
-        <p class="sub" style="margin:-6px 0 10px;font-size:12.5px">What is still needed on each deal, how long it has been open, and who it is waiting on. Overdue first.</p>
-        <div class="grid" id="actions"></div></div>
-      <div class="card"><h2>Closing soon</h2><div class="list" id="closing"></div>
-        <h2 style="margin-top:18px">Agent</h2><div id="agentInfo" class="sub"></div></div>
-    </div>
+    <div class="card" style="margin-top:18px"><h2>Needs attention</h2><div class="list" id="attention"></div></div>
   </main>
 </div>
 
