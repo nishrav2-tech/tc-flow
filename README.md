@@ -2,9 +2,13 @@
 
 Transaction coordination for Utopian Capital: every land deal from **New Contract** to **Deal Closed**, on one page. Same setup as Subdivide Finder and Hiring Flow: hosted on GitHub Pages, data in the Utopian CRM Supabase project (`yahosblylysopbxgztvg`).
 
-- **Pipeline board:** one column per stage of the GHL "Contract --> Close" pipeline, named as in GHL. Each card shows the closing date, days since the seller was last contacted, a 4-part title bar and any title issue. The dot is red (needs attention), yellow (watch) or green (on track).
+- **Pipeline board:** one column per stage of the GHL "Contract --> Close" pipeline, named as in GHL. Each card shows the closing date, the 4-part title bar, and one line each for Title, Seller and DD & Broker, each with a red, yellow or green dot.
+- **Deal view:** click a card for three panels, in order of priority:
+  1. **Title:** where it stands, who it is waiting on, when title last replied, the title timeline and anything blocking it.
+  2. **Seller contact:** last contact and what was discussed, anything owed either way, days since contact against the 10-day target, recent calls and texts.
+  3. **Due diligence and broker:** what DD has found and still needs, and every broker we asked with their pricing opinion, who we picked and whether the listing agreement is signed (`tc_brokers`).
+  The GHL stage checklist and activity log are folded underneath.
 - **Needs attention:** one line per deal that is not on track.
-- **Deal view:** click a card for the summary (stage, contract date, EMD deadline, closing date, price, title company), the title timeline (title opened, EMD submitted, title commitment received, closing scheduled) with the agent's note on anything blocking title, seller contact against the 10-day target, and the checklist for the current GHL stage only.
 
 ## How deals get in
 

@@ -146,6 +146,33 @@ a.brand{color:inherit;text-decoration:none}
 .contact{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .contact .big{font:500 28px/1 var(--serif)}
 details summary{cursor:pointer;color:var(--ink-3);font-size:13px;margin-top:10px}
+/* three lanes */
+.lane-mini{display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:5px;color:var(--ink-2);min-width:0}
+.lane-mini .dot{width:8px;height:8px;margin-top:5px}
+.lane-mini b{font-weight:600;min-width:40px}
+.lane-mini span{flex:1;min-width:0;line-height:1.4}
+.drawer section.panel{border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-top:14px}
+.phead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.phead h2{margin:0;font:500 17px var(--serif)}
+.pstatus{margin:4px 0 10px;font-size:14px;line-height:1.55}
+.pstatus.muted{color:var(--ink-3)}
+.panel h4{font:600 12px var(--sans);text-transform:uppercase;letter-spacing:.04em;color:var(--ink-3);margin:12px 0 2px}
+.panel h4:first-child{margin-top:4px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:8px 0}
+.stats div{background:var(--surface-2);border-radius:var(--r-sm);padding:7px 9px}
+.stats span{display:block;font-size:11.5px;color:var(--ink-3)} .stats b{font-weight:500;font-size:13px}
+.open-note{background:var(--gold-soft);color:var(--gold-ink);border-radius:var(--r-md);padding:8px 12px;font-size:13px;margin:6px 0}
+.meta2{font-size:12.5px;color:var(--ink-3);margin-top:8px}
+.ddlist{display:flex;flex-direction:column}
+.ddrow,.brow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border);font-size:13.5px}
+.ddrow:first-child,.brow:first-child{border-top:0}
+.ddrow .who,.brow .who{flex:1;min-width:0}
+.ddrow b,.brow b{font-weight:600}
+.ddrow .meta,.brow .meta{font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.brow .meta b{color:var(--ink);font-weight:600}
+.list.small .item{font-size:13px;padding:6px 0}
+.list.small time{color:var(--ink-3);min-width:56px;font-size:12px}
+@media(max-width:640px){.drawer{padding:16px}.drawer section.panel{padding:12px}}
 </style>
 </head>
 <body>

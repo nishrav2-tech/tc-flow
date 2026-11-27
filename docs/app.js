@@ -21,7 +21,13 @@
   const CONTACT_TARGET = 10; // one seller contact every 10 days on average
 
   let sb = null, user = null;
-  const S = { deals: [], items: [], steps: [], actions: [], events: [], contacts: [], ghlDays: [], props: {}, open: null };
+  const S = { deals: [], items: [], steps: [], actions: [], events: [], contacts: [], brokers: [], ghlDays: [], props: {}, open: null };
+  // due diligence items shown in the DD & Broker panel, whatever the GHL stage
+  const DD_STEPS = [["deed_survey", "Deed and survey"], ["zoning", "Zoning and deed restrictions"], ["utilities", "Utilities (power, water, sewer or septic)"], ["new_survey", "New survey or perc test (if needed)"]];
+  const BROKER_STATUS = { contacted: ["Asked", "p-mute"], opinion: ["Opinion in", "p-info"], chosen: ["Picked", "p-warn"], signed: ["Listing signed", "p-ok"], passed: ["Passed", "p-mute"] };
+  const WAITING = { us: "us", title: "title", seller: "the seller", funder: "the funder" };
+  const RANK = { grey: 0, green: 1, yellow: 2, red: 3 };
+  const worst = (...cs) => cs.filter(Boolean).reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "grey");
 
   // ---------- dates ----------
   const today = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
@@ -73,15 +79,47 @@
     return { count: list.length, last, since, avg, span, ok: since != null && since <= CONTACT_TARGET && (avg == null || avg <= CONTACT_TARGET) };
   }
 
+  // ---------- the three lanes: title, seller, due diligence + broker ----------
+  const sinceTxt = (ts) => { if (!ts) return null; const n = diff(tsDay(ts), today()); return n <= 0 ? "today" : n === 1 ? "yesterday" : `${n}d ago`; };
+  function titleLane(d) {
+    let c = d.title_flag || (d.title_issue ? "red" : "green");
+    if (d.title_issue && RANK[c] < RANK.yellow) c = "yellow";
+    const who = WAITING[d.title_waiting_on] || null;
+    const short = (who ? `On ${who}` : "Moving") + (d.title_last_reply ? `, title replied ${sinceTxt(d.title_last_reply)}` : ", no reply yet");
+    return { c, who, short };
+  }
+  function sellerLane(d) {
+    const sc = sellerContact(d);
+    let c = sc.since == null ? "grey" : sc.since > CONTACT_TARGET ? "red" : sc.since > 7 ? "yellow" : "green";
+    if (d.seller_open && RANK[c] < RANK.yellow) c = "yellow";
+    const short = sc.last ? `Last contact ${sc.since === 0 ? "today" : sc.since + "d ago"}` : "No contact logged";
+    return { c, sc, short };
+  }
+  const dealBrokers = (d) => S.brokers.filter((b) => b.deal_id === d.id);
+  function ddLane(d) {
+    const bs = dealBrokers(d);
+    const signed = bs.find((b) => b.status === "signed"), chosen = bs.find((b) => b.status === "chosen");
+    const opinions = bs.filter((b) => b.opinion_low || b.opinion_high || b.opinion_text).length;
+    const broker = signed ? `Listed with ${signed.name}` : chosen ? `Broker: ${chosen.name}` : opinions ? `${plural(opinions, "broker opinion")} in` : bs.length ? `Asked ${plural(bs.length, "broker")}` : "No broker yet";
+    const dd = DD_STEPS.map(([id]) => item(d, id)).filter((it) => it && it.status !== "na");
+    const done = dd.filter((it) => it.status === "done").length;
+    const c = d.dd_flag || (bs.length || done ? "yellow" : "grey");
+    return { c, bs, broker, done, total: dd.length, short: `DD ${done}/${dd.length} · ${broker}` };
+  }
+  const priceRange = (b) => (b.opinion_low && b.opinion_high && Number(b.opinion_low) !== Number(b.opinion_high) ? `${money(b.opinion_low)} to ${money(b.opinion_high)}` : money(b.opinion_low || b.opinion_high));
+
   function health(d) {
     if (d.status !== "active") return { c: "grey", why: [] };
     const t = today(), red = [], yellow = [];
-    if (d.title_issue) red.push(`Title: ${d.title_issue}`);
+    const tl = titleLane(d), sl = sellerLane(d), dl = ddLane(d);
+    if (tl.c === "red") red.push(`Title: ${d.title_issue || d.title_status || tl.short}`); else if (tl.c === "yellow") yellow.push(`Title: ${d.title_issue || tl.short}`);
+    if (d.seller_open) yellow.push(`Seller: ${d.seller_open}`);
+    if (dl.c === "red") red.push(`DD: ${d.dd_status || dl.short}`);
     const cd = closeDate(d);
     if (cd && cd < t) red.push(`Closing date passed ${plural(diff(cd, t), "day")} ago`);
     else if (cd && diff(t, cd) <= 5) { const cs = item(d, "signing_scheduled"); if (!cs || isOpen(cs)) red.push(`Closes in ${plural(diff(t, cd), "day")}, closing not scheduled`); }
     const sc = sellerContact(d);
-    if (sc.since != null && sc.since > CONTACT_TARGET) yellow.push(`No seller contact in ${sc.since} days`);
+    if (sc.since != null && sc.since > CONTACT_TARGET) red.push(`No seller contact in ${sc.since} days`);
     const over = currentItems(d).filter((i) => isOpen(i) && !i.step.optional && dueDate(d, i.step) && dueDate(d, i.step) < t);
     if (over.length) yellow.push(`${over.length} ${STAGE_LABEL[d.ghl_stage]} step${over.length > 1 ? "s" : ""} past due`);
     for (const a of S.actions.filter((x) => x.deal_id === d.id && x.status === "open")) yellow.push(a.title);
@@ -92,16 +130,17 @@
   async function loadAll() {
     if (DEMO) {
       const j = await (await fetch("demo-data.json")).json();
-      Object.assign(S, { deals: j.deals, items: j.items, steps: j.steps, actions: j.actions || [], events: j.events || [], contacts: j.contacts || [], ghlDays: j.ghlDays || [] });
+      Object.assign(S, { deals: j.deals, items: j.items, steps: j.steps, actions: j.actions || [], events: j.events || [], contacts: j.contacts || [], brokers: j.brokers || [], ghlDays: j.ghlDays || [] });
       S.props = Object.fromEntries((j.properties || []).map((p) => [p.id, p]));
     } else {
-      const [d, i, s, a, e, c] = await Promise.all([
+      const [d, i, s, a, e, c, b] = await Promise.all([
         sb.from("tc_deals").select("*"), sb.from("tc_items").select("*"), sb.from("tc_steps").select("*"),
         sb.from("tc_actions").select("*"), sb.from("tc_events").select("*").order("at", { ascending: false }).limit(300),
         sb.from("tc_contacts").select("*").order("at", { ascending: false }),
+        sb.from("tc_brokers").select("*").order("created_at"),
       ]);
       for (const x of [d, i, s, a, e]) if (x.error) throw x.error;
-      Object.assign(S, { deals: d.data, items: i.data, steps: s.data, actions: a.data, events: e.data, contacts: c.error ? [] : c.data });
+      Object.assign(S, { deals: d.data, items: i.data, steps: s.data, actions: a.data, events: e.data, contacts: c.error ? [] : c.data, brokers: b.error ? [] : b.data });
       const ids = S.deals.map((x) => x.property_id).filter(Boolean);
       if (ids.length) {
         const p = await sb.from("properties").select("id,property_id,county,state,acres,buy_price,closing_date,status").in("id", ids);
@@ -121,11 +160,13 @@
     const closing = active.filter((d) => closeDate(d) && diff(t, closeDate(d)) >= 0 && diff(t, closeDate(d)) <= 14);
     const issues = active.filter((d) => d.title_issue).length;
     const quiet = active.filter((d) => !sellerContact(d).ok).length;
+    const titleUs = active.filter((d) => d.title_waiting_on === "us" || d.title_issue).length;
+    const ddBroker = active.filter((d) => ddLane(d).bs.some((b) => b.status === "signed" || b.status === "chosen")).length;
     $("#kpis").innerHTML = [
-      ["Deals under contract", active.length, `${active.filter((d) => health(d).c === "red").length} need attention`, false],
-      ["Closing in 14 days", closing.length, closing.length ? "next: " + fmt(closing.map(closeDate).sort()[0]) : "none scheduled", false],
-      ["Title issues", issues, "waiting on a fix", issues > 0],
+      ["Title waiting on us", titleUs, `${issues} with a blocker`, titleUs > 0],
       ["Sellers due for a call", quiet, `target: every ${CONTACT_TARGET} days`, quiet > 0],
+      ["Broker picked", `${ddBroker}/${active.length}`, "listing signed or broker chosen", false],
+      ["Closing in 14 days", closing.length, closing.length ? "next: " + fmt(closing.map(closeDate).sort()[0]) : "none scheduled", false],
     ].map(([l, v, h, attn]) => `<div class="card kpi${attn ? " attn" : ""}"><div class="label">${l}</div><div class="val">${v}</div><div class="hint">${esc(h)}</div></div>`).join("");
 
     const runs = S.events.filter((e) => e.kind === "run");
@@ -150,67 +191,102 @@
   }
 
   function cardHtml(d) {
-    const p = prop(d), h = health(d), t = today(), cd = closeDate(d), sc = sellerContact(d);
+    const p = prop(d), h = health(d), t = today(), cd = closeDate(d);
+    const tl = titleLane(d), sl = sellerLane(d), dl = ddLane(d);
+    const lane = (c, label, text) => `<div class="lane-mini"><i class="dot ${c}"></i><b>${label}</b><span>${esc(text)}</span></div>`;
     return `<a class="dcard" href="#/deal/${d.id}" title="${esc(h.why.join("\n"))}">
       <div class="t"><i class="dot ${h.c}"></i><span>${esc(d.name || d.seller_name)}</span></div>
       <div class="s">${esc([p.county && p.county + " Co", p.state, p.acres && p.acres + " ac"].filter(Boolean).join(", "))}</div>
       <div class="line">${cd ? `Closing <b>${fmt(cd)}</b> ${diff(t, cd) < 0 ? `<span class="over">(${-diff(t, cd)}d late)</span>` : `(${diff(t, cd)}d)`}` : "No closing date"}</div>
-      <div class="line">Seller: <span class="${sc.ok ? "" : "soon"}">${sc.last ? `${sc.since}d ago` : "no contact logged"}</span></div>
       <div class="mini">Title ${titleBar(d)}</div>
-      ${d.title_issue ? `<div class="line over" style="font-weight:500">${esc(d.title_issue.length > 70 ? d.title_issue.slice(0, 70) + "..." : d.title_issue)}</div>` : ""}
+      ${lane(tl.c, "Title", tl.short)}
+      ${lane(sl.c, "Seller", sl.short)}
+      ${lane(dl.c, "DD", dl.broker)}
     </a>`;
   }
 
-  // ---------- deal drawer ----------
+  // ---------- deal drawer: three panels ----------
   function openDeal(id) {
     const d = S.deals.find((x) => x.id === id); if (!d) return;
     S.open = id;
-    const p = prop(d), t = today(), cd = closeDate(d), h = health(d), sc = sellerContact(d);
+    const p = prop(d), t = today(), cd = closeDate(d), h = health(d);
+    const tl = titleLane(d), sl = sellerLane(d), dl = ddLane(d), sc = sl.sc;
     const ghl = d.ghl_contact_id ? `https://app.gohighlevel.com/v2/location/${LOC}/contacts/detail/${d.ghl_contact_id}` : "";
     const sd = stageDate(d, d.ghl_stage);
     const facts = [
-      ["Stage", STAGE_LABEL[d.ghl_stage] + (sd ? ` (${diff(sd, t)}d)` : "")],
-      ["Contract date", fmt(d.contract_date) || "not set"],
+      ["GHL stage", STAGE_LABEL[d.ghl_stage] + (sd ? ` (${diff(sd, t)}d)` : "")],
+      ["Contract", fmt(d.contract_date) || "not set"],
       ["EMD deadline", fmt(d.emd_deadline) || "not set"],
-      ["Closing date", cd ? `${fmt(cd)} (${diff(t, cd) < 0 ? -diff(t, cd) + "d late" : diff(t, cd) + "d"})` : "not set"],
+      ["Closing", cd ? `${fmt(cd)} (${diff(t, cd) < 0 ? -diff(t, cd) + "d late" : diff(t, cd) + "d"})` : "not set"],
       ["Price", money(d.purchase_price || p.buy_price) || "not set"],
-      ["Title company", d.closing_agent || "not set"],
     ];
+    const panel = (c, title, right, body) => `<section class="panel"><div class="phead"><i class="dot ${c}"></i><h2>${title}</h2><div class="grow"></div>${right || ""}</div>${body}</section>`;
+    const para = (txt, empty) => (txt ? `<p class="pstatus">${esc(txt)}</p>` : `<p class="pstatus muted">${esc(empty)}</p>`);
 
-    // title timeline
+    // 1. TITLE
     const tlNodes = TITLE_STEPS.map(([sid, label], idx) => {
       const it = item(d, sid), done = it && it.status === "done", bad = d.title_issue && d.title_issue_stage === sid;
       const prevDone = idx === 0 || (item(d, TITLE_STEPS[idx - 1][0]) || {}).status === "done";
       const cls = bad ? "issue" : done ? "done" : prevDone ? "now" : "";
-      const sub = done ? fmt(itemDate(it)) : bad ? "needs attention" : prevDone ? "next" : "";
+      const sub = done ? fmt(itemDate(it)) : bad ? "blocked" : prevDone ? "next" : "";
       return `<div class="node ${cls}"><div class="ball"></div><div class="lbl">${label}</div><div class="dt">${sub}</div></div>`;
     }).join("");
-    const issue = d.title_issue ? `<div class="tlnote"><b>To keep title moving:</b> ${esc(d.title_issue)}${d.title_issue_since ? ` <span style="opacity:.8">(since ${fmt(d.title_issue_since)}, ${plural(diff(toDay(d.title_issue_since), t), "day")})</span>` : ""}</div>` : "";
+    const titleStats = [
+      ["Title last replied", d.title_last_reply ? `${fmt(d.title_last_reply)} (${sinceTxt(d.title_last_reply)})` : "no reply yet"],
+      ["Title company", d.closing_agent || "not chosen"],
+    ];
+    const titleBody = `${para(d.title_status, "No title update yet.")}
+      <div class="stats">${titleStats.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div>
+      <div class="tl">${tlNodes}</div>
+      ${d.title_issue ? `<div class="tlnote"><b>Blocking title:</b> ${esc(d.title_issue)}${d.title_issue_since ? ` <span style="opacity:.8">(since ${fmt(d.title_issue_since)}, ${plural(diff(toDay(d.title_issue_since), t), "day")})</span>` : ""}</div>` : ""}
+      ${d.closing_agent_contact ? `<div class="meta2">Contact: ${esc(d.closing_agent_contact)}</div>` : ""}`;
 
-    // seller contact
-    const recent = S.contacts.filter((c) => c.deal_id === d.id && (!d.contract_date || tsDay(c.at) >= toDay(d.contract_date))).slice(0, 5);
-    const contactHtml = `<div class="contact">
-        <div><div class="big ${sc.ok ? "" : "soon"}">${sc.since != null ? sc.since + "d" : "-"}</div><div class="meta" style="font-size:12px;color:var(--ink-3)">${sc.last ? "since last contact" : "no contact since contract"}</div></div>
-        <div><div class="big">${sc.avg != null ? sc.avg + "d" : "-"}</div><div class="meta" style="font-size:12px;color:var(--ink-3)">average gap (target ${CONTACT_TARGET}d)</div></div>
-        <div><div class="big">${sc.count}</div><div class="meta" style="font-size:12px;color:var(--ink-3)">contacts since contract</div></div>
-        <span class="pill ${sc.ok ? "p-ok" : "p-warn"}">${sc.ok ? "On track" : "Reach out"}</span></div>
-      ${recent.length ? `<div class="list" style="margin-top:8px">${recent.map((c) => `<div class="item" style="font-size:13px"><time style="min-width:70px;color:var(--ink-3)">${fmt(c.at)}</time><div class="who">${esc([c.channel, c.direction === "in" ? "from seller" : c.direction === "out" ? "to seller" : ""].filter(Boolean).join(" "))}${c.summary ? ": " + esc(c.summary) : ""}</div></div>`).join("")}</div>` : ""}`;
+    // 2. SELLER
+    const recent = S.contacts.filter((c) => c.deal_id === d.id && (!d.contract_date || tsDay(c.at) >= toDay(d.contract_date))).slice(0, 6);
+    const sellerStats = [
+      ["Since last contact", sc.since != null ? `${sc.since} days` : "-"],
+      ["Average gap", sc.avg != null ? `${sc.avg} days (target ${CONTACT_TARGET})` : "-"],
+      ["Contacts since contract", String(sc.count)],
+      ["Seller", [d.seller_name, d.seller_phone].filter(Boolean).join(" · ") || "-"],
+    ];
+    const sellerBody = `${para(d.seller_status, sc.last ? "" : "No contact logged since the contract.")}
+      ${d.seller_open ? `<div class="open-note">${esc(d.seller_open)}</div>` : ""}
+      <div class="stats">${sellerStats.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div>
+      ${recent.length ? `<div class="list small">${recent.map((c) => `<div class="item"><time>${fmt(c.at)}</time><div class="who">${esc([c.channel, c.direction === "in" ? "from seller" : c.direction === "out" ? "to seller" : ""].filter(Boolean).join(" "))}${c.summary ? ": " + esc(c.summary) : ""}</div></div>`).join("")}</div>` : ""}`;
 
-    // checklist: current stage only; earlier stages folded away
+    // 3. DUE DILIGENCE + BROKER
+    const ddRows = DD_STEPS.map(([sid, label]) => {
+      const it = item(d, sid); if (!it) return "";
+      const st = it.status === "done" ? `<span class="pill p-ok">Found</span>` : it.status === "na" ? `<span class="pill p-mute">Not needed</span>` : `<span class="pill p-warn">Still needed</span>`;
+      const detail = it.status === "done" ? it.evidence : it.agent_note;
+      return `<div class="ddrow"><div class="who"><b>${label}</b>${detail ? `<div class="meta">${esc(detail)}</div>` : ""}</div>${st}</div>`;
+    }).join("");
+    const brokerRows = dl.bs.map((b) => {
+      const [lbl, cls] = BROKER_STATUS[b.status] || [b.status, "p-mute"];
+      const op = priceRange(b);
+      return `<div class="brow"><div class="who"><b>${esc(b.name)}</b>${b.company ? ` <span class="meta">${esc(b.company)}</span>` : ""}
+          <div class="meta">${op ? `Opinion <b>${esc(op)}</b>${b.opinion_date ? ` (${fmt(b.opinion_date)})` : ""}` : "No pricing opinion yet"}${b.opinion_text ? ` · ${esc(b.opinion_text)}` : ""}${safeUrl(b.opinion_url) ? ` <a href="${esc(safeUrl(b.opinion_url))}" target="_blank" rel="noopener">email</a>` : ""}</div>
+          ${b.listing_signed_date ? `<div class="meta">Listing agreement signed ${fmt(b.listing_signed_date)}</div>` : ""}
+          ${b.notes ? `<div class="meta">${esc(b.notes)}</div>` : ""}</div>
+        <span class="pill ${cls}">${lbl}</span></div>`;
+    }).join("");
+    const ddBody = `<h4>Due diligence</h4>${para(d.dd_status, "No due diligence notes yet.")}<div class="ddlist">${ddRows}</div>
+      <h4>Broker</h4>${para(d.broker_status, "No broker contacted yet.")}${brokerRows ? `<div class="ddlist">${brokerRows}</div>` : ""}`;
+
+    // GHL stage checklist, folded away
     const cur = currentItems(d);
-    const earlierOpen = dealItems(d).filter((i) => STAGE_IDX[i.step.stage] < STAGE_IDX[d.ghl_stage] && isOpen(i));
     const evs = S.events.filter((e) => e.deal_id === d.id).slice(0, 25);
 
     $("#drawer").innerHTML = `
       <button class="btn sm x" id="closeDrawer">Close</button>
       <h3><i class="dot ${h.c}" style="margin-right:8px;vertical-align:middle"></i>${esc(d.name || d.seller_name)}</h3>
-      <p class="sub">${esc([p.county && p.county + " County", p.state, p.acres && p.acres + " acres"].filter(Boolean).join(", "))}${ghl ? ` · <a href="${ghl}" target="_blank" rel="noopener">Open in GHL</a>` : ""}</p>
+      <p class="sub">${esc([p.property_id, p.county && p.county + " County", p.state, p.acres && p.acres + " acres"].filter(Boolean).join(", "))}${ghl ? ` · <a href="${ghl}" target="_blank" rel="noopener">Open in GHL</a>` : ""}</p>
       <div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div>
       ${d.agent_summary ? `<div class="summary">${esc(d.agent_summary)}</div>` : ""}
-      <section><h2>Title</h2><div class="tl">${tlNodes}</div>${issue}</section>
-      <section><h2>Seller contact</h2>${contactHtml}</section>
-      <section><h2>${esc(STAGE_LABEL[d.ghl_stage])} checklist</h2><div id="ckList">${cur.map((it) => itemRow(d, it)).join("") || `<div class="empty">No steps for this stage.</div>`}</div>
-        ${earlierOpen.length ? `<details><summary>${plural(earlierOpen.length, "earlier step")} not ticked (the deal moved on in GHL)</summary><div id="ckOld">${earlierOpen.map((it) => itemRow(d, it, true)).join("")}</div></details>` : ""}</section>
+      ${panel(tl.c, "1. Title", tl.who ? `<span class="pill ${tl.c === "red" ? "p-bad" : tl.c === "yellow" ? "p-warn" : "p-ok"}">Waiting on ${esc(tl.who)}</span>` : "", titleBody)}
+      ${panel(sl.c, "2. Seller contact", `<span class="pill ${sl.c === "green" ? "p-ok" : sl.c === "yellow" ? "p-warn" : "p-bad"}">${sc.since != null ? (sc.since <= CONTACT_TARGET ? "On track" : "Reach out") : "No contact"}</span>`, sellerBody)}
+      ${panel(dl.c, "3. Due diligence and broker", `<span class="pill p-mute">${esc(dl.broker)}</span>`, ddBody)}
+      <details><summary>GHL stage checklist: ${esc(STAGE_LABEL[d.ghl_stage])} (${cur.filter((i) => i.status === "done").length} of ${cur.length} done)</summary><div id="ckList">${cur.map((it) => itemRow(d, it)).join("") || `<div class="empty">No steps for this stage.</div>`}</div></details>
       <details><summary>Activity</summary><div class="list log">${evs.map((e) => `<div class="item"><time>${fmtTime(e.at)}</time><div class="who">${esc(e.text)}</div></div>`).join("") || `<div class="empty">No activity yet.</div>`}</div></details>`;
     $("#scrim").classList.remove("hidden"); $("#drawer").classList.remove("hidden");
     $("#closeDrawer").onclick = closeDrawer;
@@ -290,7 +366,7 @@
     try { await loadAll(); } catch (e) { $("#sub").textContent = "Could not load data: " + (e.message || String(e)) + ". Is your email in tc_members?"; return; }
     let tm; const reload = () => { clearTimeout(tm); tm = setTimeout(() => loadAll().catch(() => {}), 800); };
     const ch = sb.channel("tc");
-    for (const tb of ["tc_deals", "tc_items", "tc_actions", "tc_events", "tc_contacts"]) ch.on("postgres_changes", { event: "*", schema: "public", table: tb }, reload);
+    for (const tb of ["tc_deals", "tc_items", "tc_actions", "tc_events", "tc_contacts", "tc_brokers"]) ch.on("postgres_changes", { event: "*", schema: "public", table: tb }, reload);
     ch.subscribe();
   }
   start();
