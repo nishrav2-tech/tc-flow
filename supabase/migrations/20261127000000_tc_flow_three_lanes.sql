@@ -48,3 +48,10 @@ alter table public.tc_brokers enable row level security;
 drop policy if exists "tc members only" on public.tc_brokers;
 create policy "tc members only" on public.tc_brokers for all to authenticated using (public.tc_is_member()) with check (public.tc_is_member());
 do $$ begin begin alter publication supabase_realtime add table public.tc_brokers; exception when others then null; end; end $$;
+
+-- who last edited each section (a person's email, or 'agent'). The agent keeps a person's edit
+-- until it finds evidence newer than the edit.
+alter table public.tc_deals add column if not exists title_edited_by text, add column if not exists title_edited_at timestamptz,
+  add column if not exists seller_edited_by text, add column if not exists seller_edited_at timestamptz,
+  add column if not exists dd_edited_by text, add column if not exists dd_edited_at timestamptz,
+  add column if not exists dates_edited_by text, add column if not exists dates_edited_at timestamptz;

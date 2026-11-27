@@ -8,6 +8,7 @@ Transaction coordination for Utopian Capital: every land deal from **New Contrac
   2. **Seller contact:** last contact and what was discussed, anything owed either way, days since contact against the 10-day target, recent calls and texts.
   3. **Due diligence and broker:** what DD has found and still needs, and every broker we asked with their pricing opinion, who we picked and whether the listing agreement is signed (`tc_brokers`).
   The GHL stage checklist and activity log are folded underneath.
+- **Editing:** every section has an Edit button (plus "Edit dates and title company", "+ Log a call or text" and "+ Add a broker"). Edits save straight to Supabase and show "Edited by <email>". The daily agent keeps a person's edit until it finds an email or GHL activity newer than the edit.
 - **Needs attention:** one line per deal that is not on track.
 
 ## How deals get in

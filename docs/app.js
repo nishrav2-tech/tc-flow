@@ -92,6 +92,7 @@
     const sc = sellerContact(d);
     let c = sc.since == null ? "grey" : sc.since > CONTACT_TARGET ? "red" : sc.since > 7 ? "yellow" : "green";
     if (d.seller_open && RANK[c] < RANK.yellow) c = "yellow";
+    if (d.seller_flag && d.seller_edited_by && d.seller_edited_by !== "agent") c = d.seller_flag;
     const short = sc.last ? `Last contact ${sc.since === 0 ? "today" : sc.since + "d ago"}` : "No contact logged";
     return { c, sc, short };
   }
@@ -220,7 +221,7 @@
       ["Closing", cd ? `${fmt(cd)} (${diff(t, cd) < 0 ? -diff(t, cd) + "d late" : diff(t, cd) + "d"})` : "not set"],
       ["Price", money(d.purchase_price || p.buy_price) || "not set"],
     ];
-    const panel = (c, title, right, body) => `<section class="panel"><div class="phead"><i class="dot ${c}"></i><h2>${title}</h2><div class="grow"></div>${right || ""}</div>${body}</section>`;
+    const panel = (kind, c, title, right, body, edited) => `<section class="panel" data-host="${kind}"><div class="phead"><i class="dot ${c}"></i><h2>${title}</h2><div class="grow"></div>${right || ""}<button class="btn sm" data-edit="${kind}">Edit</button></div><div class="pbody">${body}${edited || ""}</div></section>`;
     const para = (txt, empty) => (txt ? `<p class="pstatus">${esc(txt)}</p>` : `<p class="pstatus muted">${esc(empty)}</p>`);
 
     // 1. TITLE
@@ -252,6 +253,7 @@
     const sellerBody = `${para(d.seller_status, sc.last ? "" : "No contact logged since the contract.")}
       ${d.seller_open ? `<div class="open-note">${esc(d.seller_open)}</div>` : ""}
       <div class="stats">${sellerStats.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div>
+      <div data-host="contact"><div class="pbody"><button class="btn sm" data-edit="contact">+ Log a call or text</button></div></div>
       ${recent.length ? `<div class="list small">${recent.map((c) => `<div class="item"><time>${fmt(c.at)}</time><div class="who">${esc([c.channel, c.direction === "in" ? "from seller" : c.direction === "out" ? "to seller" : ""].filter(Boolean).join(" "))}${c.summary ? ": " + esc(c.summary) : ""}</div></div>`).join("")}</div>` : ""}`;
 
     // 3. DUE DILIGENCE + BROKER
@@ -262,16 +264,18 @@
       return `<div class="ddrow"><div class="who"><b>${label}</b>${detail ? `<div class="meta">${esc(detail)}</div>` : ""}</div>${st}</div>`;
     }).join("");
     const brokerRows = dl.bs.map((b) => {
+      return `<div data-host="broker-${b.id}"><div class="pbody">${brokerRowHtml(b)}</div></div>`; }).join("");
+    function brokerRowHtml(b) {
       const [lbl, cls] = BROKER_STATUS[b.status] || [b.status, "p-mute"];
       const op = priceRange(b);
       return `<div class="brow"><div class="who"><b>${esc(b.name)}</b>${b.company ? ` <span class="meta">${esc(b.company)}</span>` : ""}
           <div class="meta">${op ? `Opinion <b>${esc(op)}</b>${b.opinion_date ? ` (${fmt(b.opinion_date)})` : ""}` : "No pricing opinion yet"}${b.opinion_text ? ` · ${esc(b.opinion_text)}` : ""}${safeUrl(b.opinion_url) ? ` <a href="${esc(safeUrl(b.opinion_url))}" target="_blank" rel="noopener">email</a>` : ""}</div>
           ${b.listing_signed_date ? `<div class="meta">Listing agreement signed ${fmt(b.listing_signed_date)}</div>` : ""}
-          ${b.notes ? `<div class="meta">${esc(b.notes)}</div>` : ""}</div>
-        <span class="pill ${cls}">${lbl}</span></div>`;
-    }).join("");
+          ${b.notes ? `<div class="meta">${esc(b.notes)}</div>` : ""}${b.logged_by && b.logged_by !== "agent" ? `<div class="edited">Edited by ${esc(b.logged_by)}</div>` : ""}</div>
+        <div class="bright"><span class="pill ${cls}">${lbl}</span><button class="btn sm" data-edit="broker" data-id="${b.id}">Edit</button></div></div>`;
+    }
     const ddBody = `<h4>Due diligence</h4>${para(d.dd_status, "No due diligence notes yet.")}<div class="ddlist">${ddRows}</div>
-      <h4>Broker</h4>${para(d.broker_status, "No broker contacted yet.")}${brokerRows ? `<div class="ddlist">${brokerRows}</div>` : ""}`;
+      <h4>Broker</h4>${para(d.broker_status, "No broker contacted yet.")}${brokerRows ? `<div class="ddlist">${brokerRows}</div>` : ""}<div data-host="newbroker"><div class="pbody"><button class="btn sm" data-edit="broker">+ Add a broker</button></div></div>`;
 
     // GHL stage checklist, folded away
     const cur = currentItems(d);
@@ -281,17 +285,23 @@
       <button class="btn sm x" id="closeDrawer">Close</button>
       <h3><i class="dot ${h.c}" style="margin-right:8px;vertical-align:middle"></i>${esc(d.name || d.seller_name)}</h3>
       <p class="sub">${esc([p.property_id, p.county && p.county + " County", p.state, p.acres && p.acres + " acres"].filter(Boolean).join(", "))}${ghl ? ` · <a href="${ghl}" target="_blank" rel="noopener">Open in GHL</a>` : ""}</p>
-      <div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div>
+      <div data-host="dates"><div class="pbody"><div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span><b>${esc(v)}</b></div>`).join("")}</div><div class="factsbar">${editedLine(d.dates_edited_by, d.dates_edited_at)}<div class="grow"></div><button class="btn sm" data-edit="dates">Edit dates and title company</button></div></div></div>
       ${d.agent_summary ? `<div class="summary">${esc(d.agent_summary)}</div>` : ""}
-      ${panel(tl.c, "1. Title", tl.who ? `<span class="pill ${tl.c === "red" ? "p-bad" : tl.c === "yellow" ? "p-warn" : "p-ok"}">Waiting on ${esc(tl.who)}</span>` : "", titleBody)}
-      ${panel(sl.c, "2. Seller contact", `<span class="pill ${sl.c === "green" ? "p-ok" : sl.c === "yellow" ? "p-warn" : "p-bad"}">${sc.since != null ? (sc.since <= CONTACT_TARGET ? "On track" : "Reach out") : "No contact"}</span>`, sellerBody)}
-      ${panel(dl.c, "3. Due diligence and broker", `<span class="pill p-mute">${esc(dl.broker)}</span>`, ddBody)}
+      ${panel("title", tl.c, "1. Title", tl.who ? `<span class="pill ${tl.c === "red" ? "p-bad" : tl.c === "yellow" ? "p-warn" : "p-ok"}">Waiting on ${esc(tl.who)}</span>` : "", titleBody, editedLine(d.title_edited_by, d.title_edited_at))}
+      ${panel("seller", sl.c, "2. Seller contact", `<span class="pill ${sl.c === "green" ? "p-ok" : sl.c === "yellow" ? "p-warn" : "p-bad"}">${sc.since != null ? (sc.since <= CONTACT_TARGET ? "On track" : "Reach out") : "No contact"}</span>`, sellerBody, editedLine(d.seller_edited_by, d.seller_edited_at))}
+      ${panel("dd", dl.c, "3. Due diligence and broker", `<span class="pill p-mute">${esc(dl.broker)}</span>`, ddBody, editedLine(d.dd_edited_by, d.dd_edited_at))}
       <details><summary>GHL stage checklist: ${esc(STAGE_LABEL[d.ghl_stage])} (${cur.filter((i) => i.status === "done").length} of ${cur.length} done)</summary><div id="ckList">${cur.map((it) => itemRow(d, it)).join("") || `<div class="empty">No steps for this stage.</div>`}</div></details>
       <details><summary>Activity</summary><div class="list log">${evs.map((e) => `<div class="item"><time>${fmtTime(e.at)}</time><div class="who">${esc(e.text)}</div></div>`).join("") || `<div class="empty">No activity yet.</div>`}</div></details>`;
     $("#scrim").classList.remove("hidden"); $("#drawer").classList.remove("hidden");
     $("#closeDrawer").onclick = closeDrawer;
     $("#drawer").onchange = (ev) => { const cb = ev.target.closest("input[data-item]"); if (cb) toggleItem(cb); };
-    $("#drawer").onclick = (ev) => { const b = ev.target.closest("button[data-na]"); if (b) setNa(b); };
+    $("#drawer").onclick = (ev) => {
+      const b = ev.target.closest("button"); if (!b || b.id === "closeDrawer") return;
+      if (b.dataset.na) setNa(b);
+      else if (b.dataset.edit) { ev.stopPropagation(); showEdit(b); }
+      else if (b.dataset.save) saveEdit(b);
+      else if (b.hasAttribute("data-cancel")) openDeal(S.open);
+    };
     if (location.hash !== `#/deal/${id}`) history.replaceState(null, "", `#/deal/${id}`);
   }
 
@@ -331,6 +341,117 @@
     const st = stepById(it.step_id) || {};
     saveItem(it, { status: it.status === "na" ? "open" : "na" }, `${it.status === "na" ? "Needed" : "Not needed"}: ${st.title}`);
   }
+  // ---------- editing: people can change anything the agent wrote ----------
+  const me = () => (user ? user.email : "demo");
+  const opt = (pairs, cur) => pairs.map(([v, l]) => `<option value="${esc(v)}"${String(cur == null ? "" : cur) === v ? " selected" : ""}>${esc(l)}</option>`).join("");
+  const FLAGS = [["", "Automatic"], ["green", "Green: on track"], ["yellow", "Yellow: watch"], ["red", "Red: needs attention"], ["grey", "Grey: not started"]];
+  const fText = (k, label, v, rows) => `<div class="fld"><label>${label}</label><textarea name="${k}" rows="${rows || 3}">${esc(v || "")}</textarea></div>`;
+  const fInput = (k, label, v, type) => `<div class="fld"><label>${label}</label><input name="${k}" type="${type || "text"}" value="${esc(v == null ? "" : v)}"></div>`;
+  const fSelect = (k, label, pairs, v) => `<div class="fld"><label>${label}</label><select name="${k}">${opt(pairs, v)}</select></div>`;
+  const formBtns = (kind, extra) => `<div class="fbtns"><button class="btn primary sm" data-save="${kind}"${extra || ""}>Save</button><button class="btn sm" data-cancel>Cancel</button></div>`;
+  const editedLine = (by, at) => (by && at ? `<div class="edited">Edited by ${esc(by === "agent" ? "the agent" : by)} on ${fmt(at)}</div>` : "");
+
+  function editForm(d, kind) {
+    if (kind === "dates") return `<div class="eform grid2">${fInput("contract_date", "Contract date", toDay(d.contract_date), "date")}${fInput("emd_deadline", "EMD deadline", toDay(d.emd_deadline), "date")}
+      ${fInput("close_date", "Closing date", toDay(d.close_date), "date")}${fInput("purchase_price", "Purchase price ($)", d.purchase_price, "number")}
+      ${fInput("closing_agent", "Title company or closing attorney", d.closing_agent)}${fInput("closing_agent_contact", "Title contact (email, phone)", d.closing_agent_contact)}</div>${formBtns("dates")}`;
+    if (kind === "title") return `<div class="eform">${fText("title_status", "Where title stands", d.title_status, 4)}
+      <div class="grid2">${fSelect("title_waiting_on", "Waiting on", [["", "Nobody"], ["us", "Us"], ["title", "Title"], ["seller", "Seller"], ["funder", "Funder"]], d.title_waiting_on)}
+      ${fSelect("title_flag", "Color", FLAGS, d.title_flag)}${fInput("title_last_reply", "Title last replied", toDay(d.title_last_reply), "date")}
+      ${fSelect("title_issue_stage", "Blocker is on step", [["", "None"]].concat(TITLE_STEPS), d.title_issue_stage)}</div>
+      ${fText("title_issue", "What is blocking title (leave blank if nothing)", d.title_issue, 2)}</div>${formBtns("title")}`;
+    if (kind === "seller") return `<div class="eform">${fText("seller_status", "Last contact and what was discussed", d.seller_status, 3)}
+      ${fText("seller_open", "Anything owed either way (blank if nothing)", d.seller_open, 2)}${fSelect("seller_flag", "Color", FLAGS, d.seller_flag)}</div>${formBtns("seller")}`;
+    if (kind === "dd") {
+      const rows = DD_STEPS.map(([sid, label]) => { const it = item(d, sid); if (!it) return "";
+        return `<div class="ddedit" data-item-id="${it.id}"><b>${label}</b><div class="grid2"><select name="st_${it.id}">${opt([["open", "Still needed"], ["done", "Found"], ["na", "Not needed"]], it.status === "waiting" ? "open" : it.status)}</select>
+          <input name="ev_${it.id}" placeholder="What we found or what is missing" value="${esc((it.status === "done" ? it.evidence : it.agent_note) || "")}"></div></div>`; }).join("");
+      return `<div class="eform">${fText("dd_status", "Due diligence: what we found and still need", d.dd_status, 4)}${rows}
+        ${fText("broker_status", "Broker: opinions, who we picked, listing agreement", d.broker_status, 3)}${fSelect("dd_flag", "Color", FLAGS, d.dd_flag)}</div>${formBtns("dd")}`;
+    }
+    if (kind === "contact") return `<div class="eform grid2">${fInput("at", "When", new Date().toISOString().slice(0, 16), "datetime-local")}
+      ${fSelect("channel", "How", [["call", "Call"], ["sms", "Text"], ["email", "Email"], ["voicemail", "Voicemail"]], "call")}
+      ${fSelect("direction", "Direction", [["out", "We reached out"], ["in", "Seller reached us"]], "out")}${fInput("summary", "What was said", "")}</div>${formBtns("contact")}`;
+    return "";
+  }
+  function brokerForm(b) {
+    b = b || {};
+    return `<div class="eform"><div class="grid2">${fInput("name", "Name", b.name)}${fInput("company", "Company", b.company)}${fInput("email", "Email", b.email)}${fInput("phone", "Phone", b.phone)}
+      ${fSelect("status", "Status", Object.entries(BROKER_STATUS).map(([k, v]) => [k, v[0]]), b.status || "contacted")}${fInput("opinion_date", "Opinion date", toDay(b.opinion_date), "date")}
+      ${fInput("opinion_low", "Opinion low ($)", b.opinion_low, "number")}${fInput("opinion_high", "Opinion high ($)", b.opinion_high, "number")}
+      ${fInput("listing_signed_date", "Listing agreement signed", toDay(b.listing_signed_date), "date")}${fInput("opinion_url", "Link to their email", b.opinion_url)}</div>
+      ${fInput("opinion_text", "Opinion in words (e.g. $40K to $45K per lot)", b.opinion_text)}${fText("notes", "Notes", b.notes, 2)}</div>${formBtns("broker", b.id ? ` data-id="${b.id}"` : "")}`;
+  }
+  function showEdit(btn) {
+    const kind = btn.dataset.edit, d = S.deals.find((x) => x.id === S.open); if (!d) return;
+    const host = btn.closest("[data-host]") || $("#drawer").querySelector(`[data-host="${kind}"]`);
+    const box = host.querySelector(".pbody") || host;
+    if (kind === "broker") { const b = S.brokers.find((x) => String(x.id) === btn.dataset.id); box.innerHTML = brokerForm(b); }
+    else box.innerHTML = editForm(d, kind);
+  }
+  const val = (form, k) => { const el = form.querySelector(`[name="${k}"]`); if (!el) return undefined; const v = el.value.trim(); return v === "" ? null : v; };
+  async function write(table, op, patch, match) {
+    if (DEMO) return { error: null };
+    let q = sb.from(table);
+    q = op === "insert" ? q.insert(patch) : q.update(patch).eq(match[0], match[1]);
+    return await q;
+  }
+  async function logEvent(dealId, text) { if (!DEMO) await sb.from("tc_events").insert({ deal_id: dealId, actor: me(), kind: "note", text }); }
+  async function saveEdit(btn) {
+    const kind = btn.dataset.save, d = S.deals.find((x) => x.id === S.open); if (!d) return;
+    const form = btn.closest(".pbody") || btn.closest("[data-host]");
+    const now = new Date().toISOString();
+    const dealPatch = (keys, section) => { const p = {}; for (const k of keys) p[k] = val(form, k); if (section) { p[section + "_edited_by"] = me(); p[section + "_edited_at"] = now; } return p; };
+    let res, patch;
+    if (kind === "dates") {
+      patch = dealPatch(["contract_date", "emd_deadline", "close_date", "purchase_price", "closing_agent", "closing_agent_contact"], "dates");
+      res = await write("tc_deals", "update", patch, ["id", d.id]); if (!res.error) { Object.assign(d, patch); await logEvent(d.id, "Edited key dates and title company"); }
+    } else if (kind === "title") {
+      patch = dealPatch(["title_status", "title_waiting_on", "title_flag", "title_issue", "title_issue_stage"], "title");
+      const lr = val(form, "title_last_reply"); patch.title_last_reply = lr ? lr + "T17:00:00Z" : null;
+      if (!patch.title_issue) { patch.title_issue_stage = null; patch.title_issue_since = null; } else if (!d.title_issue) patch.title_issue_since = today();
+      res = await write("tc_deals", "update", patch, ["id", d.id]); if (!res.error) { Object.assign(d, patch); await logEvent(d.id, "Edited the Title section"); }
+    } else if (kind === "seller") {
+      patch = dealPatch(["seller_status", "seller_open", "seller_flag"], "seller");
+      res = await write("tc_deals", "update", patch, ["id", d.id]); if (!res.error) { Object.assign(d, patch); await logEvent(d.id, "Edited the Seller section"); }
+    } else if (kind === "contact") {
+      const at = val(form, "at"); if (!at) { toast("Pick a date"); return; }
+      const row = { deal_id: d.id, at: new Date(at).toISOString(), channel: val(form, "channel"), direction: val(form, "direction"), summary: val(form, "summary"), source: "manual", logged_by: me() };
+      res = await write("tc_contacts", "insert", row); if (!res.error) { S.contacts.unshift(row); await logEvent(d.id, `Logged a seller ${row.channel}`); }
+    } else if (kind === "dd") {
+      patch = dealPatch(["dd_status", "broker_status", "dd_flag"], "dd");
+      res = await write("tc_deals", "update", patch, ["id", d.id]);
+      if (!res.error) {
+        Object.assign(d, patch);
+        for (const [sid] of DD_STEPS) {
+          const it = item(d, sid); if (!it) continue;
+          const st = val(form, "st_" + it.id) || "open", note = val(form, "ev_" + it.id);
+          const cur = it.status === "done" ? it.evidence : it.agent_note;
+          if (st === (it.status === "waiting" ? "open" : it.status) && (note || null) === (cur || null)) continue;
+          const ip = st === "done" ? { status: "done", evidence: note, done_by: me(), done_at: it.status === "done" ? it.done_at : now, event_date: it.event_date || today() }
+            : { status: st, agent_note: note, done_by: null, done_at: null, event_date: null, evidence: null };
+          const r = await write("tc_items", "update", ip, ["id", it.id]); if (!r.error) Object.assign(it, ip); else res = r;
+        }
+        await logEvent(d.id, "Edited the Due diligence and broker section");
+      }
+    } else if (kind === "broker") {
+      const keys = ["name", "company", "email", "phone", "status", "opinion_low", "opinion_high", "opinion_text", "opinion_date", "opinion_url", "listing_signed_date", "notes"];
+      patch = {}; for (const k of keys) patch[k] = val(form, k);
+      if (!patch.name) { toast("Add the broker's name"); return; }
+      patch.status = patch.status || "contacted"; patch.logged_by = me();
+      const id = btn.dataset.id;
+      if (id) { res = await write("tc_brokers", "update", patch, ["id", id]); if (!res.error) Object.assign(S.brokers.find((x) => String(x.id) === id), patch); }
+      else {
+        const row = Object.assign({ deal_id: d.id }, patch);
+        if (DEMO) { row.id = Date.now(); S.brokers.push(row); res = { error: null }; }
+        else { res = await sb.from("tc_brokers").insert(row).select().single(); if (!res.error) S.brokers.push(res.data); }
+      }
+      if (!res.error) await logEvent(d.id, `${id ? "Edited" : "Added"} broker ${patch.name}`);
+    }
+    if (res && res.error) { toast("Could not save: " + res.error.message); return; }
+    render(); openDeal(d.id); toast(DEMO ? "Saved (demo)" : "Saved");
+  }
+
   function closeDrawer() { S.open = null; $("#scrim").classList.add("hidden"); $("#drawer").classList.add("hidden"); history.replaceState(null, "", "#/"); }
 
   // ---------- events + auth ----------
